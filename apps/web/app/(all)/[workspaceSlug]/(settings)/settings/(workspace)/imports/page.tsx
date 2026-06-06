@@ -5,6 +5,7 @@
  */
 
 import { observer } from "mobx-react";
+import { useParams } from "react-router";
 import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 import { cn } from "@plane/utils";
 import { NotAuthorizedView } from "@/components/auth-screens/not-authorized-view";
@@ -17,15 +18,19 @@ import { useUserPermissions } from "@/hooks/store/user";
 import { ImportsWorkspaceSettingsHeader } from "./header";
 
 function ImportsPage() {
-  const { workspaceUserInfo, allowPermissions } = useUserPermissions();
+  const { workspaceSlug } = useParams();
+  const { workspaceInfoBySlug, allowPermissions } = useUserPermissions();
   const { currentWorkspace } = useWorkspace();
 
+  const workspaceUserInfo = workspaceInfoBySlug(workspaceSlug as string);
   const canPerformWorkspaceMemberActions = allowPermissions(
     [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
     EUserPermissionsLevel.WORKSPACE
   );
   const pageTitle = currentWorkspace?.name ? `${currentWorkspace.name} - Imports` : undefined;
 
+  // Only short-circuit once we know the user's role for THIS workspace and they lack access.
+  // Until then, render the form so the page does not flash an unauthorized state during hydration.
   if (workspaceUserInfo && !canPerformWorkspaceMemberActions) {
     return <NotAuthorizedView section="settings" className="h-auto" />;
   }
@@ -42,7 +47,7 @@ function ImportsPage() {
           title="Import issues"
           description="Import issues from a Jira CSV export into one of your projects."
         />
-        <ImportGuide />
+        <ImportGuide disabled={!canPerformWorkspaceMemberActions} />
       </div>
     </SettingsContentWrapper>
   );

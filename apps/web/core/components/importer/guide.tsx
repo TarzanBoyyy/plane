@@ -7,10 +7,14 @@
 import { observer } from "mobx-react";
 import { ImportForm } from "./import-form";
 
-export const ImportGuide = observer(function ImportGuide() {
+type Props = {
+  disabled?: boolean;
+};
+
+export const ImportGuide = observer(function ImportGuide({ disabled = false }: Props) {
   return (
     <div className="flex size-full flex-col gap-y-13">
-      <ImportForm />
+      <ImportForm disabled={disabled} />
     </div>
   );
 });

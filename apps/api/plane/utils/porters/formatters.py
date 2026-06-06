@@ -72,7 +72,9 @@ class CSVFormatter(BaseFormatter):
 
     def _normalize_header(self, header: str) -> str:
         """Transform 'Display Name' → 'display_name' (reverse of prettify)"""
-        return header.strip().lower().replace(" ", "_")
+        if not header:
+            return ""
+        return str(header).strip().lower().replace(" ", "_")
 
     def _flatten(self, row: Dict, parent_key: str = "") -> Dict:
         items = {}

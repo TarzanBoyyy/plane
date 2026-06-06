@@ -7,7 +7,7 @@ metadata:
 
 # Jira CSV Import — Design Spec
 
-**Date:** 2026-06-02  
+**Date:** 2026-06-02
 **Status:** Approved
 
 ## Problem
@@ -24,22 +24,22 @@ Implement a symmetric import endpoint that accepts a Plane-exported CSV file and
 
 The exporter produces CSVs with these pretty-printed headers:
 
-| CSV Header | Model Field | Notes |
-|---|---|---|
-| Name | Issue.name | Required |
-| State Name | State.name | Lookup by project; fallback to project default |
-| Priority | Issue.priority | urgent/high/medium/low/none; fallback to none |
-| Assignees | Issue.assignees (M2M) | JSON list of full names; skip unknown users |
-| Labels | Issue.labels (M2M) | JSON list of label names; create if missing |
-| Start Date | Issue.start_date | YYYY-MM-DD or blank |
-| Target Date | Issue.target_date | YYYY-MM-DD or blank |
-| Is Draft | Issue.is_draft | true/false string |
-| Parent | Issue.parent | identifier string e.g. PROJ-42; resolve after bulk create |
-| Cycles | IssueIssueCycle | JSON list of cycle names; skip if not found |
-| Modules | IssueIssueModule | JSON list of module names; skip if not found |
-| Comments | IssueComment | JSON list of {comment, created_by, created_at}; created_by matched by name |
-| Links | IssueLink | JSON list of {url, title} |
-| Relations | IssueRelation | JSON list of {type, issue, direction}; resolve after bulk create |
+| CSV Header  | Model Field           | Notes                                                                      |
+| ----------- | --------------------- | -------------------------------------------------------------------------- |
+| Name        | Issue.name            | Required                                                                   |
+| State Name  | State.name            | Lookup by project; fallback to project default                             |
+| Priority    | Issue.priority        | urgent/high/medium/low/none; fallback to none                              |
+| Assignees   | Issue.assignees (M2M) | JSON list of full names; skip unknown users                                |
+| Labels      | Issue.labels (M2M)    | JSON list of label names; create if missing                                |
+| Start Date  | Issue.start_date      | YYYY-MM-DD or blank                                                        |
+| Target Date | Issue.target_date     | YYYY-MM-DD or blank                                                        |
+| Is Draft    | Issue.is_draft        | true/false string                                                          |
+| Parent      | Issue.parent          | identifier string e.g. PROJ-42; resolve after bulk create                  |
+| Cycles      | IssueIssueCycle       | JSON list of cycle names; skip if not found                                |
+| Modules     | IssueIssueModule      | JSON list of module names; skip if not found                               |
+| Comments    | IssueComment          | JSON list of {comment, created_by, created_at}; created_by matched by name |
+| Links       | IssueLink             | JSON list of {url, title}                                                  |
+| Relations   | IssueRelation         | JSON list of {type, issue, direction}; resolve after bulk create           |
 
 ---
 
@@ -102,6 +102,7 @@ Also add `ImportIssuesEndpoint` to `plane/app/views/__init__.py`.
 ## Frontend
 
 No changes needed. `ImportForm` already:
+
 - Calls `POST /api/workspaces/${slug}/import-issues/`
 - Sends `multipart/form-data` with `project_id` and `file`
 - Shows success/error toast on response

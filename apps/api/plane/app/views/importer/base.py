@@ -5,6 +5,10 @@
 import json
 from datetime import datetime
 
+from django.db import connection, transaction
+from django.db.models import Max
+from django.utils import timezone
+from django.utils.html import escape, strip_tags
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -17,11 +21,13 @@ from plane.db.models import (
     IssueLabel,
     IssueLink,
     IssueRelation,
+    IssueSequence,
     Label,
     Project,
     State,
 )
 from plane.utils.porters.formatters import CSVFormatter
+from plane.utils.uuid import convert_uuid_to_integer
 
 from .. import BaseAPIView
 
@@ -52,13 +58,60 @@ def _parse_date(value):
 
 
 def _parse_json_list(value):
+    if isinstance(value, list):
+        return value
     if not value or not str(value).strip():
         return []
     try:
         parsed = json.loads(value)
         return parsed if isinstance(parsed, list) else []
     except (json.JSONDecodeError, TypeError):
-        return []
+        # Fallback: treat semicolon-separated string as list
+        return [item.strip() for item in str(value).split(";") if item.strip()]
+
+
+def _clean_description_html(value):
+    """Accept raw HTML from description_html column."""
+    if not value or not str(value).strip():
+        return ""
+    return str(value).strip()
+
+
+def _prepare_issues_for_bulk_create(project, issues):
+    last_sequence = (
+        IssueSequence.objects.filter(project=project).aggregate(largest=Max("sequence"))["largest"] or 0
+    )
+    state_ids = {issue.state_id for issue in issues if issue.state_id is not None}
+    largest_sort_order_by_state = {
+        state_id: Issue.objects.filter(project=project, state_id=state_id).aggregate(largest=Max("sort_order"))[
+            "largest"
+        ]
+        for state_id in state_ids
+    }
+
+    completed_at = timezone.now()
+    for issue in issues:
+        last_sequence += 1
+        issue.sequence_id = last_sequence
+        issue.description_stripped = (
+            None if issue.description_html in ("", None) else strip_tags(issue.description_html)
+        )
+
+        if issue.state and issue.state.group == "completed":
+            issue.completed_at = completed_at
+        else:
+            issue.completed_at = None
+
+        if issue.state_id is not None:
+            largest_sort_order = largest_sort_order_by_state.get(issue.state_id)
+            if largest_sort_order is not None:
+                issue.sort_order = largest_sort_order + 10000
+            largest_sort_order_by_state[issue.state_id] = issue.sort_order
+
+    return [
+        IssueSequence(issue=issue, sequence=issue.sequence_id, project=project, workspace=project.workspace)
+        for issue in issues
+    ]
 
 
 class ImportIssuesEndpoint(BaseAPIView):
@@ -121,11 +174,14 @@ class ImportIssuesEndpoint(BaseAPIView):
             if priority not in VALID_PRIORITIES:
                 priority = "none"
 
-            state_name = (row.get("state_name") or "").strip().lower()
+            # Support both state_name (export format) and state_group (custom format)
+            state_name = (row.get("state_name") or row.get("state_group") or "").strip().lower()
             state = states.get(state_name, default_state)
 
             is_draft_raw = (row.get("is_draft") or "false").strip().lower()
             is_draft = is_draft_raw in ("true", "1", "yes")
+
+            description_html = _clean_description_html(row.get("description_html"))
 
             issue = Issue(
                 project=project,
@@ -133,6 +189,7 @@ class ImportIssuesEndpoint(BaseAPIView):
                 name=name,
                 priority=priority,
                 state=state,
+                description_html=description_html,
                 start_date=_parse_date(row.get("start_date")),
                 target_date=_parse_date(row.get("target_date")),
                 is_draft=is_draft,
@@ -141,14 +198,15 @@ class ImportIssuesEndpoint(BaseAPIView):
             issues_to_create.append(issue)
             row_by_index[len(issues_to_create) - 1] = row
 
-        Issue.objects.bulk_create(issues_to_create, batch_size=100)
+        with transaction.atomic():
+            if connection.vendor == "postgresql":
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_xact_lock(%s)", [convert_uuid_to_integer(project.id)])
+            issue_sequences_to_create = _prepare_issues_for_bulk_create(project, issues_to_create)
+            Issue.objects.bulk_create(issues_to_create, batch_size=100)
+            IssueSequence.objects.bulk_create(issue_sequences_to_create, batch_size=100)
 
-        created_issues = list(
-            Issue.objects.filter(
-                project=project,
-                id__in=[i.id for i in issues_to_create]
-            ).order_by("created_at")
-        )
+        created_issues = issues_to_create
 
         identifier_map = {
             f"{project.identifier}-{issue.sequence_id}": issue
@@ -211,7 +269,7 @@ class ImportIssuesEndpoint(BaseAPIView):
                 comments_to_create.append(
                     IssueComment(
                         issue=issue,
-                        comment_html=f"<p>{comment_text}</p>",
+                        comment_html=f"<p>{escape(comment_text)}</p>",
                         comment_stripped=comment_text,
                         comment_json={},
                         actor=actor,
@@ -292,7 +350,14 @@ class ImportIssuesEndpoint(BaseAPIView):
         if parents_to_update:
             Issue.objects.bulk_update(parents_to_update, ["parent"], batch_size=100)
 
-        VALID_RELATION_TYPES = {"duplicate", "relates_to", "blocked_by", "start_before", "finish_before", "implemented_by"}
+        VALID_RELATION_TYPES = {
+            "duplicate",
+            "relates_to",
+            "blocked_by",
+            "start_before",
+            "finish_before",
+            "implemented_by",
+        }
         relations_to_create = []
         for issue, rel_identifier, rel_type in relation_pairs:
             related = identifier_map.get(rel_identifier)

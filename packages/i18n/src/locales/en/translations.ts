@@ -1522,6 +1522,9 @@ export default {
           },
         },
       },
+      imports: {
+        title: "Imports",
+      },
       webhooks: {
         heading: "Webhooks",
         description: "Automate notifications to external services when project events occur.",
